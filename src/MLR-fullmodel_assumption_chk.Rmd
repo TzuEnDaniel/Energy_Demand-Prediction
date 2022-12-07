@@ -1,0 +1,66 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r,message=FALSE, warning=FALSE, results='hide'}
+rm(list = ls())
+# You can use this space to load any packages you want. 
+library(tidyverse)
+library(dplyr)
+library(car)
+library (GGally)
+library(corrplot)
+library(MASS)
+library(car)
+library(Stat2Data)
+library(olsrr)
+library(leaps)
+library(rgl)
+library(leaps)
+library(caret)
+library(lmtest)
+library(nortest)
+```
+
+```{r}
+getwd()
+workdata<-read.csv('data\\working_Barcelona.csv')
+```
+
+# Assumption check
+```{r fig.height=4}
+fullmodel1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workdata)
+summary(fullmodel1)
+res.fullmodel1 <- residuals(fullmodel1) # to obtain residuals
+std.res.fullmodel1 <- rstandard(fullmodel1) # to obtain standardized residuals
+pred.fullmodel1 <- fitted.values(fullmodel1) # to obtain fitted/predicted values
+qqnorm(y = std.res.fullmodel1, main = "Normal Q-Q Plot of Standardized Residuals Fullmodel1",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Normal Q-Q Plot of Standardized Residuals Fullmodel1", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 1.0)
+cat("\n")
+vif(fullmodel1)
+mclflag1 <- which(vif(fullmodel1) >= 10, arr.ind = TRUE, useNames = TRUE)
+ifelse(length(mclflag1) == 0, print(paste("There is no multicollinarity concern with the predictors in this model.")), print(paste("The predictor where there is a multicollinarity concern is", dimnames(mclflag1)[1],".")))
+```
+Comment(s)/observation(s) - The bulk of the data points in the Standardized residuals vs predicted values plot appear to be clustered between $\sim \pm 3$ but there are are a considerable number (red colored) of potetial outlier points outside this cluster.  Wrt class notes Lesson 6, the items to check on the residuals vs fitted value plot are linearity, non-constant variances and possible outliners.  Here, linearity looks to hold even with the numerous potential outliers to the $\pm3\sigma$ standard deviations.  As heteroscedasticity is not present, I do not see a violation in constant variances.  The bulk of the standardized residuals data appear to be normally distributed based on falling on the Normal Q-Q plot's reference line, though skewness in both tails is still evident.  Given this, I conclude these residuals are aligned with the desired state of "being randomly scattered about the zero line with no apparent pattern." 
+
+
+
+
+
+
+
+
+
+
+

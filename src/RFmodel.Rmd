@@ -1,0 +1,746 @@
+---
+title: "501 Project"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+#  Tree Forest Model to Predict Electricity Demand of Five Cities in Spain
+## Links documentation
+
+* [Github Code](https://github.com/ShaileshWasti/STAT-501-Project.git)
+* [Kaggle Data](https://www.kaggle.com/datasets/nicholasjhana/energy-consumption-generation-prices-and-weather?select=weather_features.csv)
+* [Tree Modeliong](https://towardsdatascience.com/data-science-tutorials-training-a-random-forest-in-r-a883cc1bacd1)
+
+## Install all Packages and Import Library 
+
+```{r}
+# packages we may use
+#install.packages("r package", repos = "http://cran.us.r-project.org")
+#install.packages('plyr', repos = "http://cran.us.r-project.org")
+#install.packages("tinytex")
+library(tinytex)
+#install.packages("dplyr")
+library(dplyr)
+#install.packages("randomForest")
+library(randomForest) 
+#urlPackage<-'https://cran.r-project.org/src/contrib/Archive/randomForest/randomForest_4.0-1.tar.gz'
+#install.packages(urlPackage, repos=NULL, type="source") 
+#install.packages("ranger")
+library(ranger)
+#install.packages("Metrics")
+library(Metrics)
+require(devtools)
+install_version("randomForest", version = "4.7.1", repos = "http://cran.us.r-project.org")
+install.packages("installr")
+library(installr)
+
+updateR()
+```
+
+
+## Code for Barcelona
+
+### organize data
+
+
+```{r}
+# import data raw data set
+w_BCN_raw <- read.csv("working_Barcelona.csv")
+e_BCN_raw <- read.csv("evaluation_Barcelona.csv")
+w_BCN <- w_BCN_raw[,-c(1,2)]
+e_BCN <- e_BCN_raw[,-c(1,2)]
+```
+
+```{r}
+# changes of data type
+class(w_BCN$day_night) = "category"
+class(w_BCN$time_band) = "category"
+class(w_BCN$season) = "category"
+class(w_BCN$weather_main) = "category"
+
+class(e_BCN$day_night) = "category"
+class(e_BCN$time_band) = "category"
+class(e_BCN$season) = "category"
+class(e_BCN$weather_main) = "category"
+
+# check data types
+str(w_BCN)
+str(e_BCN) 
+summary(w_BCN)
+
+```
+
+### RF modeling
+
+```{r}
+# fit random forest model
+# default RF model
+set.seed(1234)
+rf <- randomForest(formula = energy_demand ~ ., data = w_BCN)
+
+# find the num of trees in the forest with smallest MSE
+plot(rf)
+
+summary(rf)
+
+
+```
+
+
+
+```{r}
+
+n <- which.min(rf$mse)
+n
+```
+
+```{r}
+
+testBCN <- rf$mse
+testBCN <- as.data.frame(testBCN)
+
+#the slope become flat around 100 in the plot, divide test dataset at 100
+
+testBCN1 <- testBCN$test[c(1:100)]
+testBCN2 <- testBCN$test[c(100:493)]
+
+# find the average error value of the two groups
+
+avgBCN1 <- mean(testBCN1)
+diffBCN1 <- abs(testBCN1 - avgBCN1) / avgBCN1
+mean(diffBCN1)
+avgBCN2 <- mean(testBCN2)
+diffBCN2 <- abs(testBCN2 - avgBCN2) / avgBCN2
+mean(diffBCN2)
+
+#the difference between 100 and 500 is much less than that from 1 to 100
+
+```
+
+
+
+```{r fig.height=4}
+# modify the model with best mtry and importance of the predictors
+
+mtry <- tuneRF(w_BCN,w_BCN$energy_demand, ntreeTry=100,
+              stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+
+rf_modified <-randomForest(energy_demand~.,data=w_BCN, mtry = best.m, importance=TRUE,ntree=100)
+
+
+varImpPlot(randomForest(energy_demand~.,data=w_BCN, mtry = best.m, importance=TRUE,ntree=100), main = "Importance of the varibales", n.var = 5)
+
+```
+
+### check performance
+
+```{r}
+# check the time
+system.time(randomForest(energy_demand~.,data=w_BCN, mtry = best.m, importance=TRUE,ntree=100))
+```
+
+
+```{r}
+# assess the test set performance of rf_modified with Metrics library
+predvalue <- predict(rf_modified, e_BCN)
+rmse(e_BCN$energy_demand, predvalue)
+
+pdf("BCN1.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(e_BCN$energy_demand, predvalue, xlab = "Energy Demand of Test Set ", ylab = "Prediction", main = "rF for Barcelona")
+grid(10,10)
+dev.off()
+```
+
+### ranger modeling
+
+```{r}
+# create RF model with ranger package
+rf_ranger <- ranger(formula = energy_demand ~ ., data = w_BCN)
+rf_ranger
+
+```
+
+### check performance
+
+```{r}
+# check execution time
+system.time(rf_ranger <- ranger(formula = energy_demand ~ ., data = w_BCN))
+```
+
+
+```{r}
+# performance
+rmse(
+  e_BCN$energy_demand, 
+  predict(rf_ranger, e_BCN)$predictions
+  )
+
+pdf("BCN2.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(e_BCN$energy_demand, 
+  predict(rf_ranger, e_BCN)$predictions, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "Ranger for Barcelona")
+grid(10,10)
+dev.off()
+
+
+
+
+
+```
+
+
+
+
+## Code for Bilbao
+
+### organize data
+
+
+```{r}
+# import data raw data set
+w_BLB_raw <- read.csv("working_Bilbao.csv")
+e_BLB_raw <- read.csv("evaluation_Bilbao.csv")
+w_BLB <- w_BLB_raw[,-c(1,2)]
+e_BLB <- e_BLB_raw[,-c(1,2)]
+```
+
+```{r}
+# changes of data type
+class(w_BLB$day_night) = "category"
+class(w_BLB$time_band) = "category"
+class(w_BLB$season) = "category"
+class(w_BLB$weather_main) = "category"
+
+class(e_BLB$day_night) = "category"
+class(e_BLB$time_band) = "category"
+class(e_BLB$season) = "category"
+class(e_BLB$weather_main) = "category"
+
+# check data types
+str(w_BLB)
+str(e_BLB) 
+summary(w_BLB)
+
+```
+
+### RF modeling
+
+```{r}
+# fit random forest model
+# default RF model
+set.seed(1234)
+rf2 <- randomForest(formula = energy_demand ~ ., data = w_BLB)
+
+# find the num of trees in the forest with smallest MSE
+plot(rf2)
+
+summary(rf2)
+
+
+```
+
+
+
+```{r}
+
+n2 <- which.min(rf2$mse)
+n2
+```
+
+```{r}
+
+testBLB <- rf2$mse
+testBLB <- as.data.frame(testBLB)
+
+#the slope become flat around 100 in the plot, divide test dataset at 100
+
+testBLB1 <- testBLB$test[c(1:100)]
+testBLB2 <- testBLB$test[c(100:499)]
+
+# find the average error value of the two groups
+
+avgBLB1 <- mean(testBLB1)
+diffBLB1 <- abs(testBLB1 - avgBLB1) / avgBLB1
+mean(diffBCN1)
+avgBLB2 <- mean(testBLB2)
+diffBLB2 <- abs(testBLB2 - avgBLB2) / avgBLB2
+mean(diffBLB2)
+
+#the difference between 100 and 500 is much less than that from 1 to 100
+
+```
+
+
+
+```{r fig.height=4}
+# modify the model with best mtry and importance of the predictors
+
+mtry <- tuneRF(w_BLB,w_BLB$energy_demand, ntreeTry=100,
+              stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+
+rf2_modified <-randomForest(energy_demand~.,data=w_BLB, mtry = best.m, importance=TRUE,ntree=100)
+
+
+varImpPlot(randomForest(energy_demand~.,data=w_BLB, mtry = best.m, importance=TRUE,ntree=100), main = "Importance of the varibales", n.var = 5)
+
+```
+
+### check performance
+
+```{r}
+# check the time
+system.time(randomForest(formula = energy_demand ~ ., 
+                   data = w_BLB, ntree = n2, na.action=na.exclude))
+```
+
+
+```{r}
+# assess the test set performance of rf_modified with Metrics library
+predvalue <- predict(rf2_modified, e_BLB)
+rmse(e_BLB$energy_demand, predvalue)
+
+pdf("BLB1.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(e_BLB$energy_demand, predvalue, xlab = "Energy Demand of Test Set ", ylab = "Prediction", main = "rF for Bilbao")
+grid(10,10)
+dev.off()
+
+
+
+plot(e_BLB$energy_demand, predvalue, xlab = "Energy Demand of Test Set ", ylab = "Prediction", main = "rF for Bilbao")
+```
+
+### ranger modeling
+
+```{r}
+# create RF model with ranger package
+rf2_ranger <- ranger(formula = energy_demand ~ ., data = w_BLB)
+rf2_ranger
+```
+
+### check performance
+
+```{r}
+# check execution time
+system.time(rf2_ranger <- ranger(formula = energy_demand ~ ., data = w_BLB))
+```
+
+
+```{r}
+# performance
+rmse(
+  e_BLB$energy_demand, 
+  predict(rf2_ranger, e_BLB)$predictions
+  )
+
+pdf("BLB2.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(
+  e_BLB$energy_demand, 
+  predict(rf2_ranger, e_BLB)$predictions, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "Ranger for Bilbao"
+  )
+grid(10,10)
+dev.off()
+
+
+plot(
+  e_BLB$energy_demand, 
+  predict(rf2_ranger, e_BLB)$predictions, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "Ranger for Bilbao"
+  )
+```
+
+
+
+## Code for Madrid
+
+### organize data
+
+
+```{r}
+# import data raw data set
+w_MDD_raw <- read.csv("working_Madrid.csv")
+e_MDD_raw <- read.csv("evaluation_Madrid.csv")
+w_MDD <- w_MDD_raw[,-c(1,2)]
+e_MDD <- e_MDD_raw[,-c(1,2)]
+```
+
+```{r}
+# changes of data type
+class(w_MDD$day_night) = "category"
+class(w_MDD$time_band) = "category"
+class(w_MDD$season) = "category"
+class(w_MDD$weather_main) = "category"
+
+class(e_MDD$day_night) = "category"
+class(e_MDD$time_band) = "category"
+class(e_MDD$season) = "category"
+class(e_MDD$weather_main) = "category"
+
+# check data types
+str(w_MDD)
+str(e_MDD) 
+summary(w_MDD)
+
+```
+
+### RF modeling
+
+```{r}
+# fit random forest model
+# default RF model
+set.seed(1234)
+rf3 <- randomForest(formula = energy_demand ~ ., data = w_MDD)
+
+# find the num of trees in the forest with smallest MSE
+plot(rf3)
+
+summary(rf3)
+
+
+```
+
+
+
+```{r}
+
+n3 <- which.min(rf3$mse)
+n3
+```
+
+```{r}
+
+testMDD <- rf3$mse
+testMDD <- as.data.frame(testMDD)
+
+#the slope become flat around 100 in the plot, divide test dataset at 100
+
+testMDD1 <- testMDD$test[c(1:100)]
+testMDD2 <- testMDD$test[c(100:462)]
+
+# find the average error value of the two groups
+
+avgMDD1 <- mean(testMDD1)
+diffMDD1 <- abs(testMDD1 - avgMDD1) / avgMDD1
+mean(diffMDD1)
+avgMDD2 <- mean(testMDD2)
+diffMDD2 <- abs(testMDD2 - avgMDD2) / avgMDD2
+mean(diffMDD2)
+
+#the difference between 100 and 500 is much less than that from 1 to 100
+
+```
+
+
+
+```{r fig.height=4}
+# modify the model with best mtry and importance of the predictors
+
+mtry <- tuneRF(w_MDD, w_MDD$energy_demand, ntreeTry=100,
+              stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+
+rf3_modified <-randomForest(energy_demand~.,data=w_MDD, mtry = best.m, importance=TRUE,ntree=100)
+
+
+varImpPlot(randomForest(energy_demand~.,data=w_MDD, mtry = best.m, importance=TRUE,ntree=100), main = "Importance of the varibales", n.var = 5)
+
+```
+
+### check performance
+
+```{r}
+# check the time
+system.time(randomForest(formula = energy_demand ~ ., 
+                   data = w_MDD, ntree = 100, na.action=na.exclude))
+```
+
+
+```{r}
+# assess the test set performance of rf_modified with Metrics library
+predvalue <- predict(rf3_modified, e_MDD)
+rmse(e_MDD$energy_demand, predvalue)
+
+pdf("MDD1.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(e_MDD$energy_demand, predvalue, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "rF for Madrid")
+
+grid(10,10)
+dev.off()
+
+plot(e_MDD$energy_demand, predvalue, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "rF for Madrid")
+
+
+  
+
+```
+
+### ranger modeling
+
+```{r}
+# create RF model with ranger package
+rf3_ranger <- ranger(formula = energy_demand ~ ., data = w_MDD)
+rf3_ranger
+```
+
+### check performance
+
+```{r}
+# check execution time
+system.time(rf3_ranger <- ranger(formula = energy_demand ~ ., data = w_MDD))
+```
+
+
+```{r}
+# performance
+rmse(
+  e_MDD$energy_demand, 
+  predict(rf3_ranger, e_MDD)$predictions
+  )
+
+pdf("MDD2.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+
+plot(
+  e_MDD$energy_demand, 
+  predict(rf2_ranger, e_MDD)$predictions, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "Ranger for Madrid"
+  )
+grid(10,10)
+dev.off()
+
+plot(
+  e_MDD$energy_demand, 
+  predict(rf3_ranger, e_MDD)$predictions, ylab = "Prediction", xlab = "Energy Demand of Test Set", main = "Ranger for Madrid"
+  )
+```
+
+
+
+## Code for Seville
+
+### organize data
+
+
+```{r}
+# import data raw data set
+w_SVL_raw <- read.csv("working_Seville.csv")
+e_SVL_raw <- read.csv("evaluation_Seville.csv")
+w_SVL <- w_SVL_raw[,-c(1,2)]
+e_SVL <- e_SVL_raw[,-c(1,2)]
+```
+
+```{r}
+# changes of data type
+class(w_SVL$day_night) = "category"
+class(w_SVL$time_band) = "category"
+class(w_SVL$season) = "category"
+class(w_SVL$weather_main) = "category"
+
+class(e_SVL$day_night) = "category"
+class(e_SVL$time_band) = "category"
+class(e_SVL$season) = "category"
+class(e_SVL$weather_main) = "category"
+
+# check data types
+str(w_SVL)
+str(e_SVL) 
+summary(w_SVL)
+
+```
+
+### RF modeling
+
+```{r}
+# fit random forest model
+# default RF model
+set.seed(1234)
+rf4 <- randomForest(formula = energy_demand ~ ., data = w_SVL)
+# find the num of trees in the forest with smallest MSE
+plot(rf4)
+
+```
+
+```{r}
+n4 <- which.min(rf4$mse)
+n4
+```
+
+
+```{r}
+# modify the RF model
+rf4_modified <- randomForest(formula = energy_demand ~ ., 
+                   data = w_SVL, ntree = n4, na.action=na.exclude)
+rf4_modified
+
+
+```
+
+### check performance
+
+```{r}
+# check the time
+system.time(randomForest(formula = energy_demand ~ ., 
+                   data = w_SVL, ntree = n4, na.action=na.exclude))
+```
+
+
+```{r}
+# assess the test set performance of rf_modified with Metrics library
+predvalue <- predict(rf4_modified, e_SVL)
+rmse(e_SVL$energy_demand, predvalue)
+plot(e_SVL$energy_demand, predvalue, main = "Seville1")
+```
+
+### ranger modeling
+
+```{r}
+# create RF model with ranger package
+rf4_ranger <- ranger(formula = energy_demand ~ ., data = w_SVL)
+rf4_ranger
+```
+
+### check performance
+
+```{r}
+# check execution time
+system.time(rf4_ranger <- ranger(formula = energy_demand ~ ., data = w_SVL))
+```
+
+
+```{r}
+# performance
+rmse(
+  e_SVL$energy_demand, 
+  predict(rf4_ranger, e_SVL)$predictions
+  )
+plot(
+  e_SVL$energy_demand, 
+  predict(rf4_ranger, e_SVL)$predictions, xlab = "predvalue", main = "Seville2"
+  )
+```
+
+
+## Code for Valencia
+
+### organize data
+
+
+```{r}
+# import data raw data set
+w_VLC_raw <- read.csv("working_Valencia.csv")
+e_VLC_raw <- read.csv("evaluation_Valencia.csv")
+w_VLC <- w_VLC_raw[,-c(1,2)]
+e_VLC <- e_VLC_raw[,-c(1,2)]
+```
+
+```{r}
+# changes of data type
+class(w_VLC$day_night) = "category"
+class(w_VLC$time_band) = "category"
+class(w_VLC$season) = "category"
+class(w_VLC$weather_main) = "category"
+
+class(e_VLC$day_night) = "category"
+class(e_VLC$time_band) = "category"
+class(e_VLC$season) = "category"
+class(e_VLC$weather_main) = "category"
+
+# check data types
+str(w_VLC)
+str(e_VLC) 
+summary(w_VLC)
+
+```
+
+### RF modeling
+
+```{r}
+# fit random forest model
+# default RF model
+set.seed(1234)
+rf5 <- randomForest(formula = energy_demand ~ ., data = w_VLC)
+# find the num of trees in the forest with smallest MSE
+plot(rf5)
+
+```
+
+```{r}
+n5 <- which.min(rf5$mse)
+n5
+```
+
+
+```{r}
+# modify the RF model
+rf5_modified <- randomForest(formula = energy_demand ~ ., 
+                   data = w_VLC, ntree = n5, na.action=na.exclude)
+rf5_modified
+
+
+```
+
+### check performance
+
+```{r}
+# check the time
+system.time(randomForest(formula = energy_demand ~ ., 
+                   data = w_VLC, ntree = n5, na.action=na.exclude))
+```
+
+
+```{r}
+# assess the test set performance of rf_modified with Metrics library
+predvalue <- predict(rf5_modified, e_VLC)
+rmse(e_VLC$energy_demand, predvalue)
+plot(e_VLC$energy_demand, predvalue, main = "Valencia1")
+```
+
+### ranger modeling
+
+```{r}
+# create RF model with ranger package
+rf5_ranger <- ranger(formula = energy_demand ~ ., data = w_VLC)
+rf5_ranger
+```
+
+### check performance
+
+```{r}
+# check execution time
+system.time(rf5_ranger <- ranger(formula = energy_demand ~ ., data = w_VLC))
+```
+
+
+```{r}
+# performance
+rmse(
+  e_VLC$energy_demand, 
+  predict(rf5_ranger, e_VLC)$predictions
+  )
+plot(
+  e_VLC$energy_demand, 
+  predict(rf5_ranger, e_VLC)$predictions, xlab = "predvalue", main = "Valencia2"
+  )
+```
+
+

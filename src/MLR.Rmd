@@ -1,0 +1,1981 @@
+---
+title: "501 MLR Model"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+#  Multiple Linear  Regression Model to Predict Electricity Demand of Five Cities in Spain
+
+## Install all Packages and Import Library 
+
+### Package installations (if needed)
+```{r,message=FALSE, warning=FALSE, results='hide'}
+#Install required packages 
+## Uncomment the installation if the libraries are not currently installed
+#install('tidyverse')
+#install('dplyr')
+#install('car')
+#install('GGally')
+#install('corrplot')
+#install('MASS')
+#install('car')
+#install('Stat2Data')
+#install('olsrr')
+#install('leaps')
+#install('caret')
+#install('leaps')
+#install('lmtest')
+#install('nortest')
+#install(broom.mixed)
+#install('ggplot2')
+#install('ggbreak')
+```
+
+
+### Import library
+```{r,message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(dplyr)
+library(car)
+library (GGally)
+library(corrplot)
+library(MASS)
+library(car)
+library(Stat2Data)
+library(olsrr)
+library(leaps)
+library(rgl)
+library(leaps)
+library(caret)
+library(lmtest)
+library(nortest)
+library(Metrics)
+library(broom.mixed)
+library(ggbreak)
+options(scipen=999)  # turn-off scientific notation like 1e+48
+theme_set(theme_bw())  # pre-set the bw theme.
+```
+
+## Barcelona Model
+
+### Data Processing
+
+#### Read working and evaluation data set, moreover, remove the index and time stamp and snow_duration variable as these are all invalid variables (the latter as all entries are zero)
+
+```{r}
+evaldata<-read.csv('data\\evaluation_Barcelona.csv')
+workdata<-read.csv('data\\working_Barcelona.csv')
+#remove index, time_ID and snow_duration columns from "eval" analysis data frame
+evalBarcelona<-evaldata[c(-1,-2,-11)] 
+#remove index, time_ID and snow_duration columns from "work" analysis data frame
+workBarcelona<-workdata[c(-1,-2,-11)] 
+head(workBarcelona, 4L)
+```
+
+
+### Create the ggpair plot and Correlation plot
+
+```{r,,fig.height=5}
+# Correlation matrix for numeric predictors only (categorical predictors excluded)
+workcor<-workBarcelona[c(-9:-12) ]
+ggpairs(workcor)
+cor(workBarcelona)
+```
+
+### Create color spectrum correlation plot
+
+```{r,fig.height=4}
+corrplot(cor(workcor), method="color", type="full", addCoef.col = "red", tl.col="black",number.cex = 0.75)
+```
+
+## Model Processing
+
+### Build the full model
+
+```{r}
+workModel1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona)
+```
+
+### Check the multicollinearity assumption
+
+```{r, fig.height=4}
+vif(workModel1)
+```
+
+According to the VIF output E_1 and E_2 variables have serious multicollinearity issue thus remove E_2 and rebuild the model.
+
+### Dropping only E_2, not both E_1 and E_2, to address multicollinearity between E_1 and E_2
+
+```{r}
+workModelFull <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona)
+vif(workModelFull)
+```
+
+According to the VIF output, we can observe that there's no serious multicollinearity issue. 
+
+### Model assumption check
+
+```{r, fig.height=4}
+# to obtain residuals
+res.fullmodel1 <- residuals(workModelFull) 
+# to obtain standardized residuals
+std.res.fullmodel1 <- rstandard(workModelFull) 
+# to obtain fitted/predicted values
+pred.fullmodel1 <- fitted.values(workModelFull) 
+par(mfrow=c(1,1))
+qqnorm(y = std.res.fullmodel1, main = " Normal Q-Q Plot ",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Residuals Plot", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 1.0)
+```
+
+According to the Normal QQ plot, we can observe that most of points align on the reference line thus it follows the normal distribution assumption.
+
+According to the residual plot, we can observe that there's no heteroscedasticity issue , nevertheless, there are several outliers.
+
+### Check the regression output and build the reduce model 
+
+#### Based on regression summary, predictor *rain_duration* dropped as insignificant (p-values is > 0.05).  Build a reduce model then compare with the full model
+
+```{r}
+summary(workModelFull)
+df<- workModelFull %>% 
+  tidy()
+#Get the variables which there p-value larger than 0.05 
+df%>%
+  filter(df$p.value>0.05)
+workModelPvalue <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona)
+summary(workModelPvalue)
+```
+
+### Reduced model comparisons
+
++ p-value approach
+
+```{r}
+anova(workModelPvalue, workModelFull)
+```
+
+At 5% significance level , no statistical evidence to support that the full model is preferred over than reduced model.(it's simpler... no prediction performance is lost via the elimination of identified predictors). That is to say, workModelPvalue is preferred over workModelFull.
+
+ 
++ Best subset selection method
+
+#### Based on the the Best subset selection method, we drop pressue, wind_speed, rain_duration, time_band and weather_main to build the reduce model.
+
+```{r,fig.height=4}
+bestfits <- regsubsets(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona, nbest = 1)
+plot(bestfits, scale="adjr2")
+workModelBestfit<-lm(energy_demand ~ E_1 + E_25 + temp + humidity + factor(day_night) + factor(season) , data = workBarcelona)
+summary(workModelBestfit)
+anova(workModelBestfit, workModelPvalue)
+```
+
+At 5% significance level , no statistical evidence to support that the Bestfit model is preferred over than Pvalue model.(it's simpler... no prediction performance is lost via the elimination of identified predictors). That is to say, workModelPvalue is preferred over workModelBestfit.
+
++ AIC with forward selection approach test method
+
+```{r}
+workNullModel <- lm(energy_demand ~ 1, data = workBarcelona)
+step.working <- stepAIC(workNullModel, scope = list(lower = workNullModel,
+upper = workModelFull), direction = "forward", trace=FALSE)
+summary(step.working)
+```
+
+### According to the AIC method output, we get the same multiple linear model as full model.
+
++ Cross Validation test method
+
+```{r}
+# Set seed for reproducibility in CV
+set.seed(123)
+# Set up repeated k-fold cross-validation, with k=10
+train.control <- trainControl(method = "cv", number = 10)
+train.control
+# Train the model
+step.cv.work <- train(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona, method = "leapBackward",
+tuneGrid = data.frame(nvmax = 1:11),
+trControl = train.control)
+step.cv.work$results
+summary(step.cv.work$finalModel)
+workModelCross <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona)
+anova( workModelCross, workModelPvalue)
+summary(workModelCross)
+```
+
+At 5% significance level , no statistical evidence to support that the Cross Validation model is preferred over than Pvalue model. (Latter is simpler... no prediction performance is lost via the elimination of identified predictors). That is to say, workModelPvalue is preferred over workModelCross
+
++ OLS method
+
+```{r fig.height=4}
+ModelOLS <- ols_step_all_possible(workModelFull)
+cat("\n")
+plot(x = ModelOLS$n, y = ModelOLS$adjr)
+plot(x = ModelOLS$n, y = ModelOLS$aic)
+OLSsummary <- ModelOLS %>% group_by(n) %>%  filter(adjr == max(adjr))
+OLSsummary
+```
+
+Based on Adjusted R-square, the most favorable OLS model is equivalent to workModelFull.
+
+## Select the final model
+
+```{r}
+Method <- c('Full', 'P-value', 'BestFits', 'AIC Forward', 'Cross Validation','OLS_step')
+Variables <- c(12,11,7,12,10,12)
+Coefficients <- c(22,21,9,22,20,21)
+Adjusted_R2 <- c(0.9155554,0.9155523,0.9151636,0.9155554,0.9155113,0.9155523)
+BarcelonaTable<-data.frame(Method,Variables,Coefficients,Adjusted_R2)
+#Alternate order
+#ARSlist <- list(FullARS = c(summary(workModelFull)$adj.r.squared),
+#                PvalueARS = c(summary(workModelPvalue)$adj.r.squared),
+#                BestfitsARS = c(summary(workModelBestfit)$adj.r.squared),
+#                AICARS = c(summary(step.working)$adj.r.squared),
+#                CrossvARS = c(summary(workModelCross)$adj.r.squared),
+#                OLSARS = max(OLSsummary$adjr))
+#ModelOrder <- as.data.frame(ARSlist) %>% pivot_longer(cols = 1:4) %>% arrange(desc(value))
+#ModelOrder
+```
+
+Model Adjusted R-square from above methods (to 4 significant figures)
+
+A) Full: 0.9156
+
+B) P-value: 0.9156 (viewed to be the same as Full)
+
+C) Bestfits: 0.9152
+
+D) AIC Method: 0.9156
+
+E) Cross-validation: 0.9155
+
+F) OLS-step: 0.9156 (viewed to be the same as P-value)
+
+Final model is the workModelPvalue as it has the highest Adjusted R-square and fewest predictors.
+
+### Build the Final Model
+
+```{r}
+workFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBarcelona)
+```
+
+
+### Check the linearity, heteroscedasticity, outlier and normal assumption
+
+```{r, fig.height=4}
+par(mfrow=c(2,2))
+#Residual Plot
+plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#norm test
+std.res <- rstandard(workFinal)
+ad.test(std.res)
+qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage 
+lev<-hatvalues(workFinal)
+cutlev = (2*length(coefficients(workFinal)))/nrow(workBarcelona)
+# Count and assess the number of leverage values > cut-off
+potoutlier <- sum(lev > cutlev, na.rm=TRUE)
+totcount = length(fitted(workFinal))
+print(paste("The number of leverage points that are potential outliers is", potoutlier,".  This is", round(100*potoutlier/totcount,2),"% of the total number of predicted values, (", totcount,") thus not material."))
+#barplot(lev, ylim = c(0, 2*cutlev))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Barcelona working set")
+abline(h = cutlev, col = "red", lty=2)
+#cook distance
+cookdist<-cooks.distance(workFinal)
+#barplot(cookdist, ylim=c(0,1.01), main = "Cook's Distance plot")
+#barplot(cookdist, ylim=c(0,0.005), main = "Cook's Distance plot")
+#plot(log(cookdist), type="h", ylim=c(0,1.01), main = "Cook's Distance plot")
+#abline(h = 1, col = "red")
+ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.005,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+```
+
+
+
+
+## Use the estimated model to predict the values in the evaluation set
+```{r, fig.height=4}
+newdata <- evalBarcelona[ c(-2,-13)]
+predict.eval <- predict(workFinal, newdata)
+plot(x = evalBarcelona$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Barcelona")
+abline(a=0, b=1, col="blue")
+grid(10,10)
+```
+
+Prepare report figure
+```{r fig.height=4}
+# Opening the graphical device
+# Customizing the output
+pdf("BarcelonaEvalActComp.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,1))
+plot(x = evalBarcelona$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Barcelona", cex.lab = 0.75)
+abline(a=0, b=1, col="blue")
+grid(10,10)
+
+# Closing the graphical device
+dev.off()
+```
+
+## Compute the RMSE for the predictions
+```{r}
+rootmse <- rmse(evaldata$energy_demand, predict.eval)
+print(paste("The root mean square error of the predicted vs actual",nrow(evaldata),"hourly energy_data points for Barcelona over the 2015-2018 timespan is an energy demand difference of",round(rootmse,2),"MWh."))
+cat("\n")
+demandcompdf <- data.frame("Actual (MWh)" = evalBarcelona$energy_demand,"Predicted (MWh)" = predict.eval)
+head(demandcompdf,4L)
+cat("\n")
+print(paste("For example, the first actual demand value is",round(evaldata$energy_demand[1],2),"MWh and the corresponding predicted value is",round(predict.eval[1],2),"MWh. The percent error between this predicted value relative to the actual value is",round((100*(predict.eval[1] - evaldata$energy_demand[1])/evaldata$energy_demand[1]),2),"%."))
+cat("\n")
+diffpct <- c((abs(evaldata$energy_demand - predict.eval))/evaldata$energy_demand)
+print(paste("The mean difference between the",nrow(evaldata),"evaluation data set actual and model predicted values is",round(100*mean(diffpct),2),"%."))
+```
+
+## Compute and analyze Hat Matrix for Evaluation data set
+Obtain X matrix from the model
+```{r}
+Predictors <-rownames(summary(workFinal)$coefficients[,])
+workpredictors <- as.data.frame(Predictors)
+X <- model.matrix(workFinal)
+class(X)
+cat("\n")
+dim(X)
+cat("\n")
+head(X, 4L)
+```
+
+Create x_new matrix using the validation data.  Note that the purpose of running the evaluation regression here is to extract all of the correct predictor coefficients.
+```{r}
+evalFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity 
+                + pressure + wind_speed + factor(day_night) 
+                + factor(time_band) + factor(season) 
+                + factor(weather_main), data = evalBarcelona)
+Predictors <-rownames(summary(evalFinal)$coefficients[,])
+evalpredictors <- as.data.frame(Predictors)
+x_new1 <- model.matrix(evalFinal)
+cat("\n")
+dim(x_new1)
+cat("\n")
+#Check if there's a predictor difference between the work and eval matrices
+workevalcompare <-anti_join(workpredictors,evalpredictors)
+cat("\n")
+#When workevalcompare is not Null, run the following lines of code after identifying which column is missing between X and x_new1 (for Barcelona, it was found that "factor(weather_main)4" appears in WorkBarcelona but not in evalBarcelona).
+x_new_ <-as.data.frame(cbind(x_new1,rep(0,nrow(x_new1))))
+dummy_xnew<- x_new_ %>% relocate(V21,.before = 16) %>% rename("factor(weather_main)4" = V21)
+x_new <- as.matrix(dummy_xnew)  
+cat("\n")
+class(x_new)
+cat("\n")
+dim(x_new)
+cat("\n")
+head(x_new, 4L)
+```
+
+Compute the hat values for the validation data
+```{r}
+h_new_mid <- solve(t(X)%*%X)
+dim(h_new_mid)
+h_new <- x_new%*%h_new_mid%*%t(x_new)
+dim(h_new)
+```
+
+Plot the hatvalues for the data in the evaluation set
+```{r fig.height=4}
+#cutlev2 = (2*length(coefficients(evalFinal)))/nrow(evalBarcelona)
+# Count and assess the number of leverage values > cut-off
+potoutlier2 <- sum(diag(h_new) > cutlev, na.rm=TRUE)
+totcount2 = nrow(evalBarcelona)
+plot(diag(h_new), type = "h", ylab = "Leverage for the validation data set", ylim = c(0,2*cutlev), main = "Barcelona")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The number of leverage points that are potential outliers is", potoutlier2,".  This is", round(100*potoutlier2/totcount2,2),"% of the total number of predicted values, (", totcount2,") thus not material."))
+```
+
+Side-by-side comparision
+```{r fig.height=4}
+par(mfrow=c(1,2))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working data set", main = "Barcelona")
+abline(h = cutlev, col = "red", lty=2)
+plot(diag(h_new), type = "h", ylim = c(0,2*cutlev), ylab = "Leverage for the evaluation data set", main = "Barcelona")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The leverage cutoff exceedences in the evaluation set is",round(100*potoutlier2/totcount2,2),"% of the total number of observed values (", totcount2,") and is comparable to that of the working set,", round(100*potoutlier/totcount,2),"% of the total number of predicted values (", totcount,")."))
+```
+
+Prepare report figure
+```{r}
+# Opening the graphical device
+# Customizing the output
+pdf("BarcelonaLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,2))
+plot(lev, type="h", ylab = "Leverage", ylim = c(0,2*cutlev), yaxt = 'n', main = "Barcelona Working Data", res =600)
+abline(h = cutlev, col = "red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+plot(diag(h_new), type = "h", ylab = "", ylim = c(0,2*cutlev), yaxt = 'n', main = "Barcelona Evaluation Data")
+abline(h=cutlev, col="red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+# Closing the graphical device
+dev.off()
+```
+
+
+## Bilbao Model
+
+```{r}
+evaldata<-read.csv('data\\evaluation_Bilbao.csv')
+workdata<-read.csv('data\\working_Bilbao.csv')
+#remove index and time_ID columns from "eval" analysis data frame
+evalBilbao<-evaldata[c(-1,-2)] 
+#remove index and time_ID columns from "work" analysis data frame
+workBilbao<-workdata[c(-1,-2)] 
+head(workBilbao, 4L)
+```
+
+
+```{r,,fig.height=5}
+# Correlation matrix for numeric predictors only (categorical predictors excluded)
+workcor<-workBilbao[c(-10:-13)]
+ggpairs(workcor)
+cor(workBilbao)
+```
+
+
+```{r,fig.height=4}
+corrplot(cor(workcor), method="color", type="full", addCoef.col = "red", tl.col="black",number.cex = 0.75)
+```
+
+## Model Processing
+
+```{r}
+workModelBilbao1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao)
+```
+
+
+```{r, fig.height=4}
+vif(workModelBilbao1)
+```
+
+
+```{r}
+workModelBilbaoFull <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao)
+vif(workModelBilbaoFull)
+```
+
+
+```{r, fig.height=5}
+# to obtain residuals
+res.fullmodel1 <- residuals(workModelBilbaoFull) 
+# to obtain standardized residuals
+std.res.fullmodel1 <- rstandard(workModelBilbaoFull) 
+# to obtain fitted/predicted values
+pred.fullmodel1 <- fitted.values(workModelBilbaoFull) 
+par(mfrow=c(1,1))
+qqnorm(y = std.res.fullmodel1, main = " Normal Q-Q Plot ",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+#residual plot
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Residuals Plot", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 1.0)
+```
+
+```{r}
+summary(workModelBilbaoFull)
+df<- workModelBilbaoFull %>% 
+  tidy()
+#Get the variables which there p-value larger than 0.05 
+df%>%
+  filter(df$p.value>0.05)
+workModelBilbaoPvalue <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao)
+summary(workModelBilbaoPvalue)
+```
+
+### Reduced model comparisons
+
++ p-value approach
+
+```{r}
+anova(workModelBilbaoPvalue, workModelBilbaoFull)
+```
+
++ Best subset selection method
+
+```{r, fig.height=5}
+bestfits <- regsubsets(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao, nbest = 1)
+plot(bestfits, scale="adjr2")
+```
+
+```{r}
+workModelBilbaoBestfit<-lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + rain_duration + factor(day_night) + factor(weather_main), data = workBilbao)
+summary(workModelBilbaoBestfit)
+anova(workModelBilbaoBestfit, workModelBilbaoPvalue)
+```
+
++ AIC with forward selection approach test method
+
+```{r}
+workNullModel<- lm(energy_demand ~ 1, data = workBilbao)
+step.working <- stepAIC(workNullModel, scope = list(lower = workNullModel,
+upper = workModelBilbaoFull), direction = "forward", trace=FALSE)
+summary(step.working)
+```
+
+Same reduced model as P-Value approach
+
++ Cross Validation test method
+
+```{r}
+# Set seed for reproducibility in CV
+set.seed(123)
+# Set up repeated k-fold cross-validation, with k=10
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+step.cv.work <- train(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao, method = "leapBackward",
+tuneGrid = data.frame(nvmax = 1:12),
+trControl = train.control)
+step.cv.work$results
+summary(step.cv.work$finalModel)
+```
+
+```{r}
+workModelBilbaoCross <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao)
+anova( workModelBilbaoCross, workModelBilbaoPvalue)
+summary(workModelBilbaoCross)
+```
+
++ OLS method
+
+```{r fig.height=4}
+#ModelOLS <- ols_step_all_possible(workModelBilbaoFull)
+#cat("\n")
+#plot(x = ModelOLS$n, y = ModelOLS$adjr)
+#plot(x = ModelOLS$n, y = ModelOLS$aic)
+#OLSsummary <- ModelOLS %>% group_by(n) %>%  filter(adjr == max(adjr))
+#cat("\n")
+#OLSsummary
+```
+
+Same reduced model as P-Value approach (thus commenting out given processing time)
+
+## Select the final model
+
+Model adjusted R-square from above methods
+
+A) Full: 0.9154
+
+B) P-value: 0.9154
+
+C) Bestfits: 0.9149
+
+D) AIC Method: 0.9154
+
+E) Cross-validation: 0.9154
+
+F) OLS-step: 0.9154
+
+Final model is the workModelBilbaoPvalue with highest Adjusted R-square and fewest predictors.
+
+```{r}
+Method <- c('Full', 'P-value', 'BestFits', 'AIC Forward', 'Cross Validation','OLS_step')
+Variables <- c(13,12,9,12,11,12)
+Coefficients <- c(23,22,16,22,21,22)
+Adjusted_R2 <- c(0.9153865,0.9153886,0.9148913,0.9153886,0.9153680,0.9153886)
+BilbaoTable<-data.frame(Method,Variables,Coefficients,Adjusted_R2)
+```
+
+### Build the Final Model
+
+```{r}
+workFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workBilbao)
+```
+
+
+### Check the linearity, heteroscedasticity, outlier and normal assumption
+
+```{r, fig.height=4}
+par(mfrow=c(2,2))
+#Residual Plot
+plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#norm test
+std.res <- rstandard(workFinal)
+ad.test(std.res)
+qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage 
+lev<-hatvalues(workFinal)
+cutlev = (2*length(coefficients(workFinal)))/nrow(workBilbao)
+# Count and assess the number of leverage values > cut-off
+potoutlier <- sum(lev > cutlev, na.rm=TRUE)
+totcount = length(fitted(workFinal))
+print(paste("The number of leverage points that are potential outliers is", potoutlier,".  This is", round(100*potoutlier/totcount,2),"% of the total number of predicted values, (", totcount,") thus not material."))
+#barplot(lev, ylim = c(0, 2*cutlev))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Bilbao working set")
+abline(h = cutlev, col = "red", lty=2)
+#cook distance
+cookdist<-cooks.distance(workFinal)
+#barplot(cookdist, ylim=c(0,1.01), main = "Cook's Distance plot")
+#barplot(cookdist, ylim=c(0,0.005), main = "Cook's Distance plot")
+#plot((cookdist), type="h", ylim=c(0,0.05), main = "Cook's Distance plot")
+#abline(h = 1, col = "red")
+ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.015,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+```
+
+Prepare summary plot for report
+```{r fig.height=4}
+
+# Opening the graphical device
+# Customizing the output
+pdf("BilbaoLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(2,2))
+#residuals scatter plot
+plot1<-plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#normality plot
+plot2<-qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage plot
+plot3<-plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Bilbao working set")
+abline(h = cutlev, col = "red", lty=2)
+#Cook's distance plot
+plot4<-ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.015,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+
+# Closing the graphical device
+dev.off()
+
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+### Use the estimated model to predict the values in the evaluation set
+
+```{r fig.height=4}
+newdata <- evalBilbao[ c(-2,-14)]
+predict.eval <- predict(workFinal, newdata)
+plot(x = evalBilbao$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Bilbao")
+abline(a=0, b=1, col="blue")
+grid(10,10)
+```
+
+Prepare report figure
+```{r fig.height=4}
+# Opening the graphical device
+# Customizing the output
+pdf("BilbaoEvalActComp.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,1))
+plot(x = evalBilbao$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Bilbao", cex.lab = 0.75)
+abline(a=0, b=1, col="blue")
+grid(10,10)
+
+# Closing the graphical device
+dev.off()
+```
+
+### Compute the RMSE for the predictions
+
+```{r}
+rootmse <- rmse(evalBilbao$energy_demand, predict.eval)
+print(paste("The root mean square error of the predicted vs actual",nrow(evaldata),"hourly energy_data points for Bilbao over the 2015-2018 timespan is an energy demand difference of",round(rootmse,2),"MWh."))
+cat("\n")
+demandcompdf <- data.frame("Actual (MWh)" = evalBilbao$energy_demand,"Predicted (MWh)" = predict.eval)
+head(demandcompdf,4L)
+cat("\n")
+print(paste("For example, the first actual demand value is",round(evaldata$energy_demand[1],2),"MWh and the corresponding predicted value is",round(predict.eval[1],2),"MWh. The percent error between this predicted value relative to the actual value is",round((100*(predict.eval[1] - evaldata$energy_demand[1])/evaldata$energy_demand[1]),2),"%."))
+cat("\n")
+diffpct <- c((abs(evaldata$energy_demand - predict.eval))/evaldata$energy_demand)
+print(paste("The mean difference between the",nrow(evaldata),"evaluation data set actual and model predicted values is",round(100*mean(diffpct),2),"%."))
+```
+
+## Compute and analyze Hat Matrix for Evaluation data set
+Obtain X matrix from the model
+```{r}
+Predictors <-rownames(summary(workFinal)$coefficients[,])
+workpredictors <- as.data.frame(Predictors)
+X <- model.matrix(workFinal)
+class(X)
+cat("\n")
+dim(X)
+cat("\n")
+head(X, 4L)
+```
+
+Create x_new matrix using the validation data.  Note that the purpose of running the evaluation regression here is to extract all of the correct predictor coefficients.
+```{r}
+evalFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = evalBilbao)
+Predictors <-rownames(summary(evalFinal)$coefficients[,])
+evalpredictors <- as.data.frame(Predictors)
+x_new1 <- model.matrix(evalFinal)
+cat("\n")
+dim(x_new1)
+cat("\n")
+#Check if there's a predictor difference between the work and eval matrices
+workevalcompare <-anti_join(workpredictors,evalpredictors)
+cat("\n")
+#If workevalcompare is 'No data available in table', run the next line of code and skip to line 816
+x_new <- x_new1
+#Otherwise when workevalcompare is not 'No data available in table', run the following lines of code after identifying which column is missing between X and x_new1 (no discrepency was found between workBilbao but not in evalBilbao).
+#x_new_ <-as.data.frame(cbind(x_new1,rep(0,nrow(x_new1))))
+#dummy_xnew<- x_new_ %>% relocate(V21,.before = 16) %>% rename("factor(weather_main)4" = V21)
+#x_new <- as.matrix(dummy_xnew)  
+cat("\n")
+class(x_new)
+cat("\n")
+dim(x_new)
+cat("\n")
+head(x_new, 4L)
+```
+
+Compute the hat values for the validation data
+```{r}
+h_new_mid <- solve(t(X)%*%X)
+dim(h_new_mid)
+h_new <- x_new%*%h_new_mid%*%t(x_new)
+dim(h_new)
+```
+
+Plot the hatvalues for the data in the evaluation set
+```{r fig.height=4}
+#cutlev2 = (2*length(coefficients(evalFinal)))/nrow(evalBarcelona)
+# Count and assess the number of leverage values > cut-off
+potoutlier2 <- sum(diag(h_new) > cutlev, na.rm=TRUE)
+totcount2 = nrow(evalBilbao)
+plot(diag(h_new), type = "h", ylab = "Leverage for the validation data set", ylim = c(0,2*cutlev), main = "Bilbao")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The number of leverage points that are potential outliers is", potoutlier2,".  This is", round(100*potoutlier2/totcount2,2),"% of the total number of predicted values, (", totcount2,") thus not material."))
+```
+
+Side-by-side comparision
+```{r fig.height=4}
+par(mfrow=c(1,2))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working data set", main = "Barcelona")
+abline(h = cutlev, col = "red", lty=2)
+plot(diag(h_new), type = "h", ylim = c(0,2*cutlev), ylab = "Leverage for the evaluation data set", main = "Barcelona")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The leverage cutoff exceedences in the evaluation set is",round(100*potoutlier2/totcount2,2),"% of the total number of observed values (", totcount2,") and is comparable to that of the working set,", round(100*potoutlier/totcount,2),"% of the total number of predicted values (", totcount,")."))
+```
+
+Prepare report figure
+```{r}
+# Opening the graphical device
+# Customizing the output
+pdf("BilbaoLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,2))
+plot(lev, type="h", ylab = "Leverage", ylim = c(0,2*cutlev), yaxt = 'n', main = "Bilbao Working Data", res =600)
+abline(h = cutlev, col = "red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+plot(diag(h_new), type = "h", ylab = "", ylim = c(0,2*cutlev), yaxt = 'n', main = "Bilbao Evaluation Data")
+abline(h=cutlev, col="red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+# Closing the graphical device
+dev.off()
+```
+
+## Madrid Model
+
+```{r}
+evaldata<-read.csv('data\\evaluation_Madrid.csv')
+workdata<-read.csv('data\\working_Madrid.csv')
+#remove index and time_ID columns from "eval" analysis dataframe
+evalMadrid<-evaldata[c(-1,-2)] 
+#remove index and time_ID columns from "work" analysis dataframe
+workMadrid<-workdata[c(-1,-2)] 
+head(workMadrid, 4L)
+```
+
+
+```{r,,fig.height=5}
+# Correlation matrix for numeric predictors only (categorical predictors excluded)
+workcor<-workMadrid[c(-10:-13) ]
+ggpairs(workcor)
+cor(workMadrid)
+```
+
+
+```{r,fig.height=4}
+corrplot(cor(workcor), method="color", type="full", addCoef.col = "red", tl.col="black",number.cex = 0.75)
+```
+
+
+```{r}
+workModelMadrid1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid)
+```
+
+
+```{r, fig.height=4}
+vif(workModelMadrid1)
+```
+
+
+```{r}
+workModelMadridFull <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid)
+vif(workModelMadridFull)
+```
+
+
+```{r, fig.height=5}
+# to obtain residuals
+res.fullmodel1 <- residuals(workModelMadridFull) 
+# to obtain standardized residuals
+std.res.fullmodel1 <- rstandard(workModelMadridFull) 
+# to obtain fitted/predicted values
+pred.fullmodel1 <- fitted.values(workModelMadridFull) 
+par(mfrow=c(1,1))
+qqnorm(y = std.res.fullmodel1, main = " Normal Q-Q Plot ",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+#residual plot
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Residuals Plot", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 0.5)
+```
+
+```{r}
+summary(workModelMadridFull)
+df<- workModelMadridFull %>% 
+  tidy()
+#Get the variables which there p-value larger than 0.05 
+df%>%
+  filter(df$p.value>0.05)
+workModelMadridPvalue <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid)
+summary(workModelMadridPvalue)
+```
+
++ p-value approach
+
+```{r}
+anova(workModelMadridPvalue, workModelMadridFull)
+```
+
++ Best subset selection method
+
+```{r, fig.height=5}
+bestfits <- regsubsets(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid, nbest = 1)
+plot(bestfits, scale="adjr2")
+```
+
+```{r}
+workModelMadridBestfit<-lm(energy_demand ~ E_1 + E_25 + temp + wind_speed + factor(day_night) + factor(time_band) + factor(season) , data = workMadrid)
+summary(workModelMadridBestfit)
+anova(workModelMadridBestfit, workModelMadridPvalue)
+```
+
++ AIC with forward selection approach test method
+
+```{r}
+workNullModel<- lm(energy_demand ~ 1, data = workMadrid)
+step.working <- stepAIC(workNullModel, scope = list(lower = workNullModel,
+upper = workModelMadridFull), direction = "forward", trace=FALSE)
+summary(step.working)
+```
+
+Same reduced model as P-value
+
++ Cross Validation test method
+
+```{r,message=FALSE, warning=FALSE}
+# Set seed for reproducibility in CV
+set.seed(123)
+# Set up repeated k-fold cross-validation, with k=10
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+step.cv.work <- train(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid, method = "leapBackward",
+tuneGrid = data.frame(nvmax = 1:12),
+trControl = train.control)
+step.cv.work$results
+summary(step.cv.work$finalModel)
+```
+
+
+```{r}
+workModelMadridCross <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workMadrid)
+anova( workModelMadridCross, workModelMadridPvalue)
+summary(workModelMadridCross)
+```
+
++ OLS method
+
+```{r fig.height=4}
+#ModelOLS <- ols_step_all_possible(workModelMadridFull)
+#cat("\n")
+#plot(x = ModelOLS$n, y = ModelOLS$adjr)
+#plot(x = ModelOLS$n, y = ModelOLS$aic)
+#OLSsummary <- ModelOLS %>% group_by(n) %>%  filter(adjr == max(adjr))
+#OLSsummary
+```
+
+Same reduced model as P-Value approach (thus commenting out given processing time)
+
+## Select the final model
+
+Model adjusted R-square from above methods (to four significant digits)
+
+A) Full: 0.916
+
+B) P-value: 0.916
+
+C) Bestfits: 0.9154
+
+D) AIC Method: 0.916
+
+E) Cross-validation: 0.916
+
+F) OLS-step: 0.916
+
+Final model is the workModelMadridPvalue with highest Adjusted R-square and fewest predictors.
+
+```{r}
+Method <- c('Full', 'P-value', 'BestFits', 'AIC Forward', 'Cross Validation')
+Variables <- c(13,12,8,12,11)
+Coefficients <- c(23,22,11,22,21)
+Adjusted_R2 <- c(0.9160325,0.9160309,0.9153598,0.9160309,0.9159974)
+MadridTable<-data.frame(Method,Variables,Coefficients,Adjusted_R2)
+```
+
+### Build the Final Model
+
+```{r}
+workFinal <- workModelMadridPvalue
+```
+
+
+### Check the linearity, heteroscedasticity, outlier and normal assumption
+
+```{r, fig.height=4}
+par(mfrow=c(2,2))
+#Residual Plot
+plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#norm test
+std.res <- rstandard(workFinal)
+ad.test(std.res)
+qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage 
+lev<-hatvalues(workFinal)
+cutlev = (2*length(coefficients(workFinal)))/nrow(workMadrid)
+# Count and assess the number of leverage values > cut-off
+potoutlier <- sum(lev > cutlev, na.rm=TRUE)
+totcount = length(fitted(workFinal))
+print(paste("The number of leverage points that are potential outliers is", potoutlier,".  This is", round(100*potoutlier/totcount,2),"% of the total number of predicted values, (", totcount,") thus not material."))
+#barplot(lev, ylim = c(0, 2*cutlev))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working set")
+abline(h = cutlev, col = "red", lty=2)
+#cook distance
+cookdist<-cooks.distance(workFinal)
+#barplot(cookdist, ylim=c(0,1.01), main = "Cook's Distance plot")
+#abline(h = 1, col = "red")
+ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.01,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+```
+
+Prepare summary plot for report
+```{r fig.height=4}
+
+# Opening the graphical device
+# Customizing the output
+pdf("MadridLevComp.pdf",         # File name
+    width = 14, height = 10, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(2,2))
+#residuals scatter plot
+plot1<-plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#normality plot
+plot2<-qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage plot
+plot3<-plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Madrid working set")
+abline(h = cutlev, col = "red", lty=2)
+#Cook's distance plot
+plot4<-ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.01,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+
+# Closing the graphical device
+dev.off()
+
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+### Use the estimated model to predict the values in the evaluation set
+
+```{r}
+newdata <- evalMadrid[ c(-2,-14)]
+predict.eval <- predict(workFinal, newdata)
+plot(x = evalMadrid$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Madrid")
+abline(a=0, b=1, col="blue")
+grid(10,10)
+```
+
+Prepare report figure
+```{r fig.height=4}
+# Opening the graphical device
+# Customizing the output
+pdf("MadridEvalActComp.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,1))
+plot(x = evalMadrid$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Madrid", cex.lab = 0.75)
+abline(a=0, b=1, col="blue")
+grid(10,10)
+
+# Closing the graphical device
+dev.off()
+```
+
+### Compute the RMSE for the predictions
+
+```{r}
+rootmse <- rmse(evalMadrid$energy_demand, predict.eval)
+rootmse <- rmse(evaldata$energy_demand, predict.eval)
+print(paste("The root mean square error of the predicted vs actual",nrow(evaldata),"hourly energy_data points for Madrid over the 2015-2018 timespan is an energy demand difference of",round(rootmse,2),"MWh."))
+cat("\n")
+demandcompdf <- data.frame("Actual (MWh)" = evalMadrid$energy_demand,"Predicted (MWh)" = predict.eval)
+head(demandcompdf,4L)
+cat("\n")
+print(paste("For example, the first actual demand value is",round(evaldata$energy_demand[1],2),"MWh and the corresponding predicted value is",round(predict.eval[1],2),"MWh. The percent error between this predicted value relative to the actual value is",round((100*(predict.eval[1] - evaldata$energy_demand[1])/evaldata$energy_demand[1]),2),"%."))
+cat("\n")
+diffpct <- c((abs(evaldata$energy_demand - predict.eval))/evaldata$energy_demand)
+print(paste("The mean difference between the",nrow(evaldata),"evaluation data set actual and model predicted values is",round(100*mean(diffpct),2),"%."))
+```
+
+## Compute and analyze Hat Matrix for Evaluation data set
+Obtain X matrix from the model
+```{r}
+Predictors <-rownames(summary(workFinal)$coefficients[,])
+workpredictors <- as.data.frame(Predictors)
+X <- model.matrix(workFinal)
+class(X)
+cat("\n")
+dim(X)
+cat("\n")
+head(X, 4L)
+```
+
+Create x_new matrix using the validation data.  Note that the purpose of running the evaluation regression here is to extract all of the correct predictor coefficients.
+```{r}
+evalFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + 
+    rain_duration + factor(day_night) + factor(time_band) + factor(season) + 
+    factor(weather_main), data = evalMadrid)
+Predictors <-rownames(summary(evalFinal)$coefficients[,])
+evalpredictors <- as.data.frame(Predictors)
+x_new1 <- model.matrix(evalFinal)
+cat("\n")
+dim(x_new1)
+cat("\n")
+#Check if there's a predictor difference between the work and eval matrices
+workevalcompare <-anti_join(workpredictors,evalpredictors)
+cat("\n")
+#If workevalcompare is 'No data available in table', run the next line of code and skip to line 816
+x_new <- x_new1
+#Otherwise when workevalcompare is not 'No data available in table', run the following lines of code after identifying which column is missing between X and x_new1 (no discrepancy was found between workMadrid but not in evalMadrid).
+#x_new_ <-as.data.frame(cbind(x_new1,rep(0,nrow(x_new1))))
+#dummy_xnew<- x_new_ %>% relocate(V21,.before = 16) %>% rename("factor(weather_main)4" = V21)
+#x_new <- as.matrix(dummy_xnew)  
+cat("\n")
+class(x_new)
+cat("\n")
+dim(x_new)
+cat("\n")
+head(x_new, 4L)
+```
+
+Compute the hat values for the validation data
+```{r}
+h_new_mid <- solve(t(X)%*%X)
+dim(h_new_mid)
+h_new <- x_new%*%h_new_mid%*%t(x_new)
+dim(h_new)
+```
+
+Plot the hatvalues for the data in the evaluation set
+```{r fig.height=4}
+#cutlev2 = (2*length(coefficients(evalFinal)))/nrow(evalMadrid)
+# Count and assess the number of leverage values > cut-off
+potoutlier2 <- sum(diag(h_new) > cutlev, na.rm=TRUE)
+totcount2 = nrow(evalMadrid)
+plot(diag(h_new), type = "h", ylab = "Leverage for the validation data set", ylim = c(0,2*cutlev), main = "Madrid")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The number of leverage points that are potential outliers is", potoutlier2,".  This is", round(100*potoutlier2/totcount2,2),"% of the total number of predicted values, (", totcount2,") thus not material."))
+```
+
+Side-by-side comparision
+```{r fig.height=4}
+par(mfrow=c(1,2))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working data set", main = "Madrid")
+abline(h = cutlev, col = "red", lty=2)
+plot(diag(h_new), type = "h", ylim = c(0,2*cutlev), ylab = "Leverage for the evaluation data set", main = "Madrid")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The leverage cutoff exceedences in the evaluation set is",round(100*potoutlier2/totcount2,2),"% of the total number of observed values (", totcount2,") and is comparable to that of the working set,", round(100*potoutlier/totcount,2),"% of the total number of predicted values (", totcount,")."))
+```
+
+Prepare report figure
+```{r}
+# Opening the graphical device
+# Customizing the output
+pdf("MadridLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,2))
+plot(lev, type="h", ylab = "Leverage", ylim = c(0,2*cutlev), yaxt = 'n', main = "Madrid Working Data", res =600)
+abline(h = cutlev, col = "red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+plot(diag(h_new), type = "h", ylab = "", ylim = c(0,2*cutlev), yaxt = 'n', main = "Madrid Evaluation Data")
+abline(h=cutlev, col="red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+# Closing the graphical device
+dev.off()
+```
+
+## Seville Model
+
+```{r}
+evaldata<-read.csv('data\\evaluation_Seville.csv')
+workdata<-read.csv('data\\working_Seville.csv')
+#remove index, time_ID and snow_duration columns from "eval" analysis dataframe
+evalSeville<-evaldata[c(-1,-2,-11)] 
+#remove index, time_ID and snow_duration columns from "work" analysis dataframe
+workSeville<-workdata[c(-1,-2,-11)] 
+head(workSeville, 4L)
+```
+
+
+```{r,,fig.height=5}
+# Correlation matrix for numeric predictors only (categorical predictors excluded)
+workcor<-workSeville[c(-9:-12) ]
+ggpairs(workcor)
+cor(workSeville)
+```
+
+
+```{r,fig.height=4}
+corrplot(cor(workcor), method="color", type="full", addCoef.col = "red", tl.col="black",number.cex = 0.75)
+```
+
+
+```{r}
+workModelSeville1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workSeville)
+```
+
+
+```{r, fig.height=4}
+vif(workModelSeville1)
+```
+
+
+```{r}
+workModelSevilleFull <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workSeville)
+vif(workModelSevilleFull)
+```
+
+
+```{r, fig.height=5}
+# to obtain residuals
+res.fullmodel1 <- residuals(workModelSevilleFull) 
+# to obtain standardized residuals
+std.res.fullmodel1 <- rstandard(workModelSevilleFull) 
+# to obtain fitted/predicted values
+pred.fullmodel1 <- fitted.values(workModelSevilleFull) 
+par(mfrow=c(1,1))
+qqnorm(y = std.res.fullmodel1, main = " Normal Q-Q Plot ",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+#residual plot
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Residuals Plot", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 0.5)
+```
+
+```{r}
+summary(workModelSevilleFull)
+df<- workModelSevilleFull %>% 
+  tidy()
+#Get the variables which there p-value larger than 0.05 
+df%>%
+  filter(df$p.value>0.05)
+workModelSevillePvalue <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workSeville)
+summary(workModelSevillePvalue)
+```
+
++ p-value approach
+
+```{r}
+anova(workModelSevillePvalue, workModelSevilleFull)
+```
+
++ Best subset selection method
+
+```{r, fig.height=5}
+bestfits <- regsubsets(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workSeville, nbest = 1)
+plot(bestfits, scale="adjr2")
+```
+
+```{r}
+workModelSevilleBestfit<-lm(energy_demand ~ E_1 + E_25 + temp + humidity + wind_speed + factor(day_night) + factor(season) , data = workSeville)
+summary(workModelSevilleBestfit)
+anova(workModelSevilleBestfit, workModelSevillePvalue)
+```
+
++ AIC with forward selection approach test method
+
+```{r}
+workNullModel<- lm(energy_demand ~ 1, data = workSeville)
+step.working <- stepAIC(workNullModel, scope = list(lower = workNullModel,
+upper = workModelSevilleFull), direction = "forward", trace=FALSE)
+summary(step.working)
+```
+
++ Cross Validation test method
+
+```{r,warning=FALSE}
+# Set seed for reproducibility in CV
+set.seed(123)
+# Set up repeated k-fold cross-validation, with k=10
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+step.cv.work <- train(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workSeville, method = "leapBackward",
+tuneGrid = data.frame(nvmax = 1:11),
+trControl = train.control)
+step.cv.work$results
+summary(step.cv.work$finalModel)
+```
+
+Reduced model same as P-value approach
+
++ OLS method
+
+```{r fig.height=4}
+#ModelOLS <- ols_step_all_possible(workModelSevilleFull)
+#cat("\n")
+#plot(x = ModelOLS$n, y = ModelOLS$adjr)
+#plot(x = ModelOLS$n, y = ModelOLS$aic)
+#OLSsummary <- ModelOLS %>% group_by(n) %>%  filter(adjr == max(adjr))
+```
+
+Same reduced model as P-Value approach (thus commenting out given processing time)
+
+## Select the final model
+
+Model adjusted R-square from above methods (to four significant digits)
+
+A) Full: 0.9199
+
+B) P-value: 0.9199
+
+C) Bestfits: 0.9189
+
+D) AIC Method: 0.9199
+
+E) Cross-validation: 0.9199
+
+Final model is the workModelSevillePvalue with highest Adjusted R-square and fewest predictors.
+
+```{r}
+Method <- c('Full','P-value', 'BestFits', 'AIC Forward', 'Cross Validation')
+Variables <- c(12,11,8,12,11)
+Coefficients <- c(24,23,10,24,23)
+Adjusted_R2 <- c(0.9199264,0.9199208,0.9189457,0.9199264,0.9199208)
+SevilleTable<-data.frame(Method,Variables,Coefficients,Adjusted_R2)
+```
+
+### Build the Final Model
+
+```{r}
+workFinal <- workModelSevillePvalue
+```
+
+
+### Check the linearity, heteroscedasticity, outlier and normal assumption
+
+```{r, fig.height=4}
+par(mfrow=c(2,2))
+#Residual Plot
+plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#norm test
+std.res <- rstandard(workFinal)
+ad.test(std.res)
+qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage 
+lev<-hatvalues(workFinal)
+cutlev = (2*length(coefficients(workFinal)))/nrow(workSeville)
+# Count and assess the number of leverage values > cut-off
+potoutlier <- sum(lev > cutlev, na.rm=TRUE)
+totcount = length(fitted(workFinal))
+print(paste("The number of leverage points that are potential outliers is", potoutlier,".  This is", round(100*potoutlier/totcount,2),"% of the total number of predicted values, (", totcount,") thus not material."))
+#barplot(lev, ylim = c(0, 2*cutlev))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working set")
+abline(h = cutlev, col = "red", lty=2)
+#cook distance
+cookdist<-cooks.distance(workFinal)
+#barplot(cookdist, ylim=c(0,1.01), main = "Cook's Distance plot")
+#abline(h = 1, col = "red")
+ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.03,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+```
+
+Prepare summary plot for report
+```{r fig.height=4}
+
+# Opening the graphical device
+# Customizing the output
+pdf("SevilleLevComp.pdf",         # File name
+    width = 14, height = 10, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(2,2))
+#residuals scatter plot
+plot1<-plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#normality plot
+plot2<-qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage plot
+plot3<-plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Seville working set")
+abline(h = cutlev, col = "red", lty=2)
+#Cook's distance plot
+plot4<-ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.03,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+
+# Closing the graphical device
+dev.off()
+
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+### Use the estimated model to predict the values in the evaluation set
+
+```{r}
+newdata <- evalSeville[ c(-2,-13)]
+predict.eval <- predict(workFinal, newdata)
+plot(x = evalSeville$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Seville")
+abline(a=0, b=1, col="blue")
+grid(10,10)
+```
+
+Prepare report figure
+```{r fig.height=4}
+# Opening the graphical device
+# Customizing the output
+pdf("SevilleEvalActComp.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,1))
+plot(x = evalSeville$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Seville", cex.lab = 0.75)
+abline(a=0, b=1, col="blue")
+grid(10,10)
+
+# Closing the graphical device
+dev.off()
+```
+
+### Compute the RMSE for the predictions
+
+```{r}
+rootmse <- rmse(evalSeville$energy_demand, predict.eval)
+rootmse <- rmse(evaldata$energy_demand, predict.eval)
+print(paste("The root mean square error of the predicted vs actual",nrow(evaldata),"hourly energy_data points for Seville over the 2015-2018 timespan is an energy demand difference of",round(rootmse,2),"MWh."))
+cat("\n")
+demandcompdf <- data.frame("Actual (MWh)" = evalSeville$energy_demand,"Predicted (MWh)" = predict.eval)
+head(demandcompdf,4L)
+cat("\n")
+print(paste("For example, the first actual demand value is",round(evaldata$energy_demand[1],2),"MWh and the corresponding predicted value is",round(predict.eval[1],2),"MWh. The percent error between this predicted value relative to the actual value is",round((100*(predict.eval[1] - evaldata$energy_demand[1])/evaldata$energy_demand[1]),2),"%."))
+cat("\n")
+diffpct <- c((abs(evaldata$energy_demand - predict.eval))/evaldata$energy_demand)
+print(paste("The mean difference between the",nrow(evaldata),"evaluation data set actual and model predicted values is",round(100*mean(diffpct),2),"%."))
+```
+
+## Compute and analyze Hat Matrix for Evaluation data set
+Obtain X matrix from the model
+```{r}
+Predictors <-rownames(summary(workFinal)$coefficients[,])
+workpredictors <- as.data.frame(Predictors)
+X <- model.matrix(workFinal)
+class(X)
+cat("\n")
+dim(X)
+cat("\n")
+head(X, 4L)
+```
+
+Create x_new matrix using the validation data.  Note that the purpose of running the evaluation regression here is to extract all of the correct predictor coefficients.
+```{r}
+evalFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + 
+                  wind_speed + factor(day_night) + factor(time_band) + 
+                  factor(season) + factor(weather_main), data = evalSeville)
+Predictors <-rownames(summary(evalFinal)$coefficients[,])
+evalpredictors <- as.data.frame(Predictors)
+x_new1 <- model.matrix(evalFinal)
+cat("\n")
+dim(x_new1)
+cat("\n")
+#Check if there's a predictor difference between the work and eval matrices
+workevalcompare <-anti_join(workpredictors,evalpredictors)
+cat("\n")
+#If workevalcompare is 'No data available in table', run the next line of code and skip to line 1580
+#x_new <- x_new1
+#Otherwise when workevalcompare is not 'No data available in table', run the following lines of code after identifying which column is missing between X and x_new1 (for Seville, it was found that "factor(weather_main)11" appears in workSeville but not in evalSeville).
+x_new_ <-as.data.frame(cbind(x_new1,rep(0,nrow(x_new1))))
+dummy_xnew<- x_new_ %>% relocate(V23,.before = 22) %>% rename("factor(weather_main)11" = V23)
+x_new <- as.matrix(dummy_xnew)  
+cat("\n")
+class(x_new)
+cat("\n")
+dim(x_new)
+cat("\n")
+head(x_new, 4L)
+```
+
+Compute the hat values for the validation data
+```{r}
+h_new_mid <- solve(t(X)%*%X)
+dim(h_new_mid)
+h_new <- x_new%*%h_new_mid%*%t(x_new)
+dim(h_new)
+```
+
+Plot the hatvalues for the data in the evaluation set
+```{r fig.height=4}
+#cutlev2 = (2*length(coefficients(evalFinal)))/nrow(evalSeville)
+# Count and assess the number of leverage values > cut-off
+potoutlier2 <- sum(diag(h_new) > cutlev, na.rm=TRUE)
+totcount2 = nrow(evalSeville)
+plot(diag(h_new), type = "h", ylab = "Leverage for the validation data set", ylim = c(0,2*cutlev), main = "Seville")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The number of leverage points that are potential outliers is", potoutlier2,".  This is", round(100*potoutlier2/totcount2,2),"% of the total number of predicted values, (", totcount2,") thus not material."))
+```
+
+Side-by-side comparision
+```{r fig.height=4}
+par(mfrow=c(1,2))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working data set", main = "Seville")
+abline(h = cutlev, col = "red", lty=2)
+plot(diag(h_new), type = "h", ylim = c(0,2*cutlev), ylab = "Leverage for the evaluation data set", main = "Seville")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The leverage cutoff exceedences in the evaluation set is",round(100*potoutlier2/totcount2,2),"% of the total number of observed values (", totcount2,") and is comparable to that of the working set,", round(100*potoutlier/totcount,2),"% of the total number of predicted values (", totcount,")."))
+```
+
+Prepare report figure
+```{r}
+# Opening the graphical device
+# Customizing the output
+pdf("SevilleLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,2))
+plot(lev, type="h", ylab = "Leverage", ylim = c(0,2*cutlev), yaxt = 'n', main = "Seville Working Data", res =600)
+abline(h = cutlev, col = "red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+plot(diag(h_new), type = "h", ylab = "", ylim = c(0,2*cutlev), yaxt = 'n', main = "Seville Evaluation Data")
+abline(h=cutlev, col="red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+# Closing the graphical device
+dev.off()
+```
+
+## Valencia Model
+
+```{r}
+evaldata<-read.csv('data\\evaluation_Valencia.csv')
+workdata<-read.csv('data\\working_Valencia.csv')
+#remove index and time_ID columns from "eval" analysis dataframe
+evalValencia<-evaldata[c(-1,-2)] 
+#remove index and time_ID columns from "work" analysis dataframe
+workValencia<-workdata[c(-1,-2)] 
+head(workValencia, 4L)
+```
+
+
+```{r,,fig.height=5}
+# Correlation matrix for numeric predictors only (categorical predictors excluded)
+workcor<-workValencia[c(-10:-13) ]
+ggpairs(workcor)
+cor(workValencia)
+```
+
+
+```{r,fig.height=4}
+corrplot(cor(workcor), method="color", type="full", addCoef.col = "red", tl.col="black",number.cex = 0.75)
+```
+
+
+```{r}
+workModelValencia1 <- lm(energy_demand ~ E_1 + E_2 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia)
+```
+
+
+```{r, fig.height=4}
+vif(workModelValencia1)
+```
+
+
+```{r}
+workModelValenciaFull <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia)
+vif(workModelValenciaFull)
+```
+
+
+```{r, fig.height=5}
+# to obtain residuals
+res.fullmodel1 <- residuals(workModelValenciaFull) 
+# to obtain standardized residuals
+std.res.fullmodel1 <- rstandard(workModelValenciaFull) 
+# to obtain fitted/predicted values
+pred.fullmodel1 <- fitted.values(workModelValenciaFull) 
+par(mfrow=c(1,1))
+qqnorm(y = std.res.fullmodel1, main = " Normal Q-Q Plot ",
+       xlab = "Theoretical Quantiles", ylab = "Sample Quantiles")
+qqline(y = std.res.fullmodel1)
+#residual plot
+resplotdata1 <- data.frame(std.res.fullmodel1, pred.fullmodel1)
+resbf1 <- lm(std.res.fullmodel1 ~ pred.fullmodel1, data = resplotdata1)
+plot(x = pred.fullmodel1, y = std.res.fullmodel1, ylab = "Standardized Residuals", xlab = "Predicted Values", main = "Residuals Plot", col = ifelse(std.res.fullmodel1 < -3,"red",ifelse(std.res.fullmodel1 > 3,"red","black")))
+abline(h = 0, col="blue", lty=1)
+abline(resbf1, col="red", lty=3)
+abline(h = 3, col="green", lty=3)
+abline(h=-3, col="green", lty=3)
+legend("bottomleft", legend=c("Best fit line of standardized residuals", "Horizontal line y = 0.0", "Horizontal line, y = +/- 3"), fill = c("red","blue","green"), cex = 0.5)
+```
+
+```{r}
+summary(workModelValenciaFull)
+df<- workModelValenciaFull %>% 
+  tidy()
+#Get the variables which there p-value larger than 0.05 
+df%>%
+  filter(df$p.value>0.05)
+workModelValenciaPvalue <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia)
+summary(workModelValenciaPvalue)
+```
+
++ p-value approach
+
+```{r}
+anova(workModelValenciaPvalue, workModelValenciaFull)
+```
+
++ Best subset selection method
+
+```{r, fig.height=5}
+bestfits <- regsubsets(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia, nbest = 1)
+plot(bestfits, scale="adjr2")
+```
+
+```{r}
+workModelValenciaBestfit<-lm(energy_demand ~ E_1 + E_25 + temp + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia)
+summary(workModelValenciaBestfit)
+anova(workModelValenciaBestfit, workModelValenciaPvalue)
+```
+
++ AIC with forward selection approach test method
+
+```{r}
+workNullModel<- lm(energy_demand ~ 1, data = workValencia)
+step.working <- stepAIC(workNullModel, scope = list(lower = workNullModel,
+upper = workModelValenciaFull), direction = "forward", trace=FALSE)
+summary(step.working)
+```
+
++ Cross Validation test method
+
+```{r}
+# Set seed for reproducibility in CV
+set.seed(123)
+# Set up repeated k-fold cross-validation, with k=10
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+step.cv.work <- train(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + snow_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia, method = "leapBackward",
+tuneGrid = data.frame(nvmax = 1:12),
+trControl = train.control)
+step.cv.work$results
+summary(step.cv.work$finalModel)
+```
+
+
+```{r}
+workModelValenciaCross <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = workValencia)
+anova( workModelValenciaCross, workModelValenciaPvalue)
+summary(workModelValenciaCross)
+```
+
++ OLS method
+
+```{r fig.height=4}
+#ModelOLS <- ols_step_all_possible(workModelValenciaFull)
+#cat("\n")
+#plot(x = ModelOLS$n, y = ModelOLS$adjr)
+#plot(x = ModelOLS$n, y = ModelOLS$aic)
+#OLSsummary <- ModelOLS %>% group_by(n) %>%  filter(adjr == max(adjr))
+```
+
+Same reduced model as P-Value approach (thus commenting out given processing time)
+
+## Select the final model
+
+Model adjusted R-square from above methods
+
+A) Full: 0.9177
+
+B) P-value: 0.9177
+
+C) Bestfits: 0.9174
+
+D) AIC Method: 0.9177
+
+E) Cross-validation: 0.9176
+
+Final model is the workModelValenciaPvalue with highest Adjusted R-square.
+
+```{r}
+Method <- c('Full','P-value', 'BestFits', 'AIC Forward', 'Corss Validation')
+Variables <- c(13,12,8,12,9)
+Coefficients <- c(23,22,18,22,19)
+Adjusted_R <- c(0.9176974,0.9176977,0.9173514,0.9176977,0.9175922)
+ValenciaTable<-data.frame(Method,Variables,Coefficients,Adjusted_R)
+```
+
+### Build the Final Model
+
+```{r}
+workFinal <- workModelValenciaPvalue
+```
+
+
+### Check the linearity, heteroscedasticity, outlier and normal assumption
+
+```{r, fig.height=4}
+par(mfrow=c(2,2))
+#Residual Plot
+plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#norm test
+std.res <- rstandard(workFinal)
+ad.test(std.res)
+qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage 
+lev<-hatvalues(workFinal)
+cutlev = (2*length(coefficients(workFinal)))/nrow(workValencia)
+# Count and assess the number of leverage values > cut-off
+potoutlier <- sum(lev > cutlev, na.rm=TRUE)
+totcount = length(fitted(workFinal))
+print(paste("The number of leverage points that are potential outliers is", potoutlier,".  This is", round(100*potoutlier/totcount,2),"% of the total number of predicted values, (", totcount,") thus not material."))
+#barplot(lev, ylim = c(0, 2*cutlev))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working set")
+abline(h = cutlev, col = "red", lty=2)
+#cook distance
+cookdist<-cooks.distance(workFinal)
+#barplot(cookdist, ylim=c(0,1.01), main = "Cook's Distance plot")
+#abline(h = 1, col = "red")
+ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.05,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+```
+
+Prepare summary plot for report
+```{r fig.height=4}
+
+# Opening the graphical device
+# Customizing the output
+pdf("ValenciaLevComp.pdf",         # File name
+    width = 14, height = 10, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(2,2))
+#residuals scatter plot
+plot1<-plot(x=fitted(workFinal), y=studres(workFinal), xlab = "Fitted Values",
+ylab = "Studentized Residuals", main='Residuals Plot', col = ifelse(studres(workFinal) < -3,"red",ifelse(studres(workFinal) > 3,"red","black")))
+abline(h=-3, col="red", lty=2)
+abline(h=3, col="red", lty=2)
+#normality plot
+plot2<-qqnorm(studres(workFinal), pch = 1, frame = FALSE, main=expression("AD test =2.2*10"^-16))
+qqline(studres(workFinal), col = "steelblue", lwd = 2)
+#leverage plot
+plot3<-plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for Valencia working set")
+abline(h = cutlev, col = "red", lty=2)
+#Cook's distance plot
+plot4<-ggplot(as.data.frame(cookdist),aes(x=1:nrow(as.data.frame(cookdist)),y=cookdist)) +
+  geom_line() + 
+  geom_hline(aes(yintercept = 1,color = "red"))+
+  scale_y_continuous(limits = c(0,1.1))+
+  scale_y_break(breaks = c(0.05,0.9), scales =0.1) +
+  guides(color = "none") +
+  labs(title="Cook's Distance",
+        x ="Index", y = "")
+
+# Closing the graphical device
+dev.off()
+
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+### Use the estimated model to predict the values in the evaluation set
+
+```{r}
+newdata <- evalValencia[ c(-2,-14)]
+predict.eval <- predict(workFinal, newdata)
+plot(x = evalValencia$energy_demand, y=predict.eval, xlab="actual energy demand for the evaluation set",
+ylab="predicted energy demand for the evaluation set", main = "Valencia")
+abline(a=0, b=1, col="blue")
+grid(10,10)
+```
+
+Prepare report figure
+```{r fig.height=4}
+# Opening the graphical device
+# Customizing the output
+pdf("ValenciaEvalActComp.pdf",         # File name
+    width = 7, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,1))
+plot(x = evalValencia$energy_demand, y=predict.eval, xlab="Actual energy demand for the evaluation set",
+ylab="Predicted energy demand for the evaluation set", main = "Valencia", cex.lab = 0.75)
+abline(a=0, b=1, col="blue")
+grid(10,10)
+
+# Closing the graphical device
+dev.off()
+```
+
+### Compute the RMSE for the predictions
+
+```{r}
+rootmse <- rmse(evalValencia$energy_demand, predict.eval)
+rootmse <- rmse(evaldata$energy_demand, predict.eval)
+print(paste("The root mean square error of the predicted vs actual",nrow(evaldata),"hourly energy_data points for Valencia over the 2015-2018 timespan is an energy demand difference of",round(rootmse,2),"MWh."))
+cat("\n")
+demandcompdf <- data.frame("Actual (MWh)" = evalValencia$energy_demand,"Predicted (MWh)" = predict.eval)
+head(demandcompdf,4L)
+cat("\n")
+print(paste("For example, the first actual demand value is",round(evaldata$energy_demand[1],2),"MWh and the corresponding predicted value is",round(predict.eval[1],2),"MWh. The percent error between this predicted value relative to the actual value is",round((100*(predict.eval[1] - evaldata$energy_demand[1])/evaldata$energy_demand[1]),2),"%."))
+cat("\n")
+diffpct <- c((abs(evaldata$energy_demand - predict.eval))/evaldata$energy_demand)
+print(paste("The mean difference between the",nrow(evaldata),"evaluation data set actual and model predicted values is",round(100*mean(diffpct),2),"%."))
+```
+
+## Compute and analyze Hat Matrix for Evaluation data set
+Obtain X matrix from the model
+```{r}
+Predictors <-rownames(summary(workFinal)$coefficients[,])
+workpredictors <- as.data.frame(Predictors)
+X <- model.matrix(workFinal)
+class(X)
+cat("\n")
+dim(X)
+cat("\n")
+head(X, 4L)
+```
+
+Create x_new matrix using the validation data.  Note that the purpose of running the evaluation regression here is to extract all of the correct predictor coefficients.
+```{r}
+evalFinal <- lm(energy_demand ~ E_1 + E_25 + temp + humidity + pressure + wind_speed + rain_duration + factor(day_night) + factor(time_band) + factor(season) + factor(weather_main), data = evalValencia)
+Predictors <-rownames(summary(evalFinal)$coefficients[,])
+evalpredictors <- as.data.frame(Predictors)
+x_new1 <- model.matrix(evalFinal)
+cat("\n")
+dim(x_new1)
+cat("\n")
+#Check if there's a predictor difference between the work and eval matrices
+workevalcompare <-anti_join(workpredictors,evalpredictors)
+cat("\n")
+#If workevalcompare is 'No data available in table', run the next line of code and skip to line 1960
+x_new <- x_new1
+#Otherwise when workevalcompare is not 'No data available in table', run the following lines of code after identifying which column is missing between X and x_new1 (no discrepancy was found between workValencia but not in evalValencia).
+#x_new_ <-as.data.frame(cbind(x_new1,rep(0,nrow(x_new1))))
+#dummy_xnew<- x_new_ %>% relocate(V21,.before = 16) %>% rename("factor(weather_main)4" = V21)
+#x_new <- as.matrix(dummy_xnew)  
+cat("\n")
+class(x_new)
+cat("\n")
+dim(x_new)
+cat("\n")
+head(x_new, 4L)
+```
+
+Compute the hat values for the validation data
+```{r}
+h_new_mid <- solve(t(X)%*%X)
+dim(h_new_mid)
+h_new <- x_new%*%h_new_mid%*%t(x_new)
+dim(h_new)
+```
+
+Plot the hatvalues for the data in the evaluation set
+```{r fig.height=4}
+#cutlev2 = (2*length(coefficients(evalFinal)))/nrow(evalValencia)
+# Count and assess the number of leverage values > cut-off
+potoutlier2 <- sum(diag(h_new) > cutlev, na.rm=TRUE)
+totcount2 = nrow(evalValencia)
+plot(diag(h_new), type = "h", ylab = "Leverage for the validation data set", ylim = c(0,2*cutlev), main = "Valencia")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The number of leverage points that are potential outliers is", potoutlier2,".  This is", round(100*potoutlier2/totcount2,2),"% of the total number of predicted values, (", totcount2,") thus not material."))
+```
+
+Side-by-side comparision
+```{r fig.height=4}
+par(mfrow=c(1,2))
+plot(lev, type="h", ylim = c(0, 2*cutlev), ylab="Leverage for the working data set", main = "Valencia")
+abline(h = cutlev, col = "red", lty=2)
+plot(diag(h_new), type = "h", ylim = c(0,2*cutlev), ylab = "Leverage for the evaluation data set", main = "Valencia")
+abline(h=cutlev, col="red", lty=2)
+print(paste("The leverage cutoff exceedences in the evaluation set is",round(100*potoutlier2/totcount2,2),"% of the total number of observed values (", totcount2,") and is comparable to that of the working set,", round(100*potoutlier/totcount,2),"% of the total number of predicted values (", totcount,")."))
+```
+
+Prepare report figure
+```{r}
+# Opening the graphical device
+# Customizing the output
+pdf("ValenciaLevComp.pdf",         # File name
+    width = 14, height = 4, # Width and height in inches
+    bg = "white",          # Background color
+    colormodel = "cmyk")  # Color model
+   
+par(mfrow=c(1,2))
+plot(lev, type="h", ylab = "Leverage", ylim = c(0,2*cutlev), yaxt = 'n', main = "Valencia Working Data", res =600)
+abline(h = cutlev, col = "red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+plot(diag(h_new), type = "h", ylab = "", ylim = c(0,2*cutlev), yaxt = 'n', main = "Valencia Evaluation Data")
+abline(h=cutlev, col="red", lty=2)
+axis(side = 2, at=seq(0,2*round(cutlev,5),by=round(cutlev,5)))
+
+# Closing the graphical device
+dev.off()
+```
