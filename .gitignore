@@ -1,0 +1,7 @@
+.gitattributes
+.DS_Store
+.Rproj.user
+
+
+Src/Rhistory 
+Src/MLR.pdf
